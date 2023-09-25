@@ -1,0 +1,3 @@
+build/
+python/tvm/auto_scheduler/__pycache__/
+*.pyc
