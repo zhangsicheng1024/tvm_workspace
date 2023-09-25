@@ -1,0 +1,23 @@
+----------compute----------
+M=512, N=4096, K=1024
+block_num=128, thread_num=256
+local_size=64, data_shared_size=64, kernel_shared_size=4096
+
+----------block----------
+for i_block in 32
+for j_block in 4
+for k_out in 256
+per block: data[16*4] x kernel[4*1024] = ret[16*1024]
+
+----------thread----------
+for i_thread in 2
+for j_thread in 128
+per thread: data[8*4] x kernel[4*8] = ret[8*8]
+
+----------local----------
+for vthread_loop in 1
+for k_local_0 in 2
+for i_local_0 in 2
+for j_local_0 in 8
+for k_local_1 in 2
+for i_local_1 in 4

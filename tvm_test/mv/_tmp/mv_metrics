@@ -1,0 +1,17 @@
+==16699== NVPROF is profiling process 16699, command: python ./_tmp/mv_rerun.py --config1 mv_N32768K8192_ori_1000_2_json/mv_999.json
+==16699== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
+==16699== Profiling application: python ./_tmp/mv_rerun.py --config1 mv_N32768K8192_ori_1000_2_json/mv_999.json
+==16699== Profiling result:
+==16699== Metric result:
+Invocations                               Metric Name                                Metric Description         Min         Max         Avg
+Device "NVIDIA Tesla P100-PCIE-16GB (0)"
+    Kernel: mymv_kernel0
+          1                    dram_read_transactions                   Device Memory Read Transactions    33555803    33555803    33555803
+          1                   dram_write_transactions                  Device Memory Write Transactions       35831       35831       35831
+          1                      l2_read_transactions                              L2 Read Transactions    33642910    33642910    33642910
+          1                     l2_write_transactions                             L2 Write Transactions        4165        4165        4165
+          1                  shared_load_transactions                          Shared Load Transactions    10485760    10485760    10485760
+          1                 shared_store_transactions                         Shared Store Transactions     8650752     8650752     8650752
+          1                         flop_count_sp_fma   Floating Point Operations(Single Precision FMA)   268435456   268435456   268435456
+          1                        flop_sp_efficiency                      FLOP Efficiency(Peak Single)       3.16%       3.16%       3.16%
+          1                             sm_efficiency                           Multiprocessor Activity      98.49%      98.49%      98.49%

@@ -1,0 +1,121 @@
+power cap
+SW Power Cap SW Power Scaling algorithm is reducing the clocks below requested clocks because the GPU is consuming too much power. 
+E.g. SW power cap limit can be changed with nvidia-smi --power-limit=
+
+
+
+dram_write_bytes不准
+    1 The GPU memory system is shared by all engines. 
+    The primary engine the is the graphics/compute engine but other engines such as copy engines, display, etc. 
+    access the device memory and the memory control (FB = framebuffer) counters do not have a method to track the requester.
+
+    2 NVPROF injection does not attempt to evict all context memory from the L2 cache. 
+    The cudaMemcpys prior to the launch and the kernel replay code in nvprof will leave the L2 cache in an inconsistent state.
+
+    3 The initial size of 4KB is simply to small to accurately track. 
+    The full data set could be in L2 from either the cudaMemcpy or replay. 
+    Furthermore, the bytes you see can be from other clients such as the constant caches.
+
+    It is highly recommends you scale the buffer size to a reasonable size. 
+    On newer GPUs the Nsight Compute profiler has improved L2 level breakdown of various clients to help detect unexpected traffic. 
+    In addition Nsight Compute replay logic clears the L2 cache so that each replay has a consistent start state.
+
+    If you have a monitor attached it is recommended to move the monitor to a different GPU when looking at DRAM counters. 
+    nvprof L2 counters generally filter the count by traffic from the SMs 
+    so traffic from copy engines, the display controller, MMU, constant caches, etc. will not show up in the L2 counters.
+
+
+
+Texture cache
+    Only available on devices of compute capability 3.5, 
+    read only global memory accesses can alternatively go through the texture cache using a standard pointer 
+    without the need to bind a texture beforehand and without the sizing limitations of standard textures
+    好像P100上l1 cache和texture cache是统一的，和Shared Memory分开 http://images.nvidia.cn/content/pdf/tesla/whitepaper/pascal-architecture-whitepaper-v1.2.pdf
+    然后V100上又是l1 cache和Shared Memory在一起 https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf
+
+
+
+部分参数来源图示
+    https://stackoverflow.com/questions/37732735/nvprof-option-for-bandwidth/37740119#37740119
+    Device memory <-> L2 cache: dram_read(write)_transactions(throughput)
+    L2 cache <-> Texture(L1) cache: l2_tex(l1 x)_read(write)_transactions(throughput) 实际上好像没有l1
+    V100上应该只有l2_tex_read(write),指L2 <-> L1 ?
+    L1 is write through cache
+    texture cache is read-only
+    Shared Memory <-> Shared: shared_load(store)_transactions(throughput)
+    Global <-> Kernel: gld(gst)_transactions(throughput)
+    Local <-> Kernel: local_load(store)_transactions
+
+
+
+dram_write_transactions
+    Since the L2 cacheline is 32 bytes (whereas the L1 cacheline and size of a global transaction is 128 bytes), 
+    the device memory transactions are also 32 bytes, not 128 bytes. 
+
+    dram_write_bytes = dram_write_transactions * 32 (目前看起来似乎是这样)
+    So a global write transaction that passes through L1 (it is a write-through cache if enabled) and L2 will generate 4 dram_write transactions. (?)
+
+
+
+l2_local_load_bytes
+    Bytes read from L2 for misses in Unified Cache(L1 & tex?) for local loads
+
+l2_global_load_bytes
+    类似？
+
+
+
+l2_write_transactions
+    Memory write transactions seen at L2 cache for all write requests
+    应该是l1->l2 write + tex->l2 write
+    不过只有l2_tex_read(write)_transactions, l1可以用 l2 - tex来算？
+
+
+
+l2_local_global_store_bytes
+    Bytes written to L2 from Unified Cache for local and global stores. This does not include global atomics.
+
+
+
+然后似乎是一些访存以外的metrics
+
+inst_executed_local_loads(stores)
+    Warp level instructions for local loads(stores)
+
+
+
+
+gst_transactions            2097152
+local_store_transactions    537395200
+l2_write_transactions       539915200
+dram_write_transactions     538364736
+
+gst + local_store = l2_write = dram_write (为什么不是4*dram_write?)
+
+M1024N4096K1024
+result = M*N = 1048576 float = 4194304 Bytes
+
+
+----------------------------------------------------------------
+150w搜到的kernel 300w run?
+    150w搜到的比较好的kernel都是power占满150w的，所以基本 min energy = min latency
+    min energy的kernel，放到300w后，power依然是显著提升的，虽然基本没有到300w
+    也有power不变，基本维持150w的kernel，但似乎都是初期找到的比较差的结果(?)latency很差
+
+l1 cache / texture cache ?
+    V100上大概是没有区分l1 cache和texture cache了：
+    Combining data cache and shared memory functionality into a single memory block provides the best overall performance for both types of memory accesses. 
+    The combined capacity is 128 KB/SM, more than seven times larger than the GP100 data cache, 
+    and all of it is usable as a cache by programs that do not use shared memory. 
+    Texture units also use the cache. For example, if shared memory is configured to 64 KB, texture and load/store operations can use the remaining 64 KB of L1.
+
+关于nsight compute
+    似乎对kernel有给出一些更详细的信息/建议
+
+    Occupancy: https://docs.nvidia.com/nsight-visual-studio-edition/4.6/Content/Analysis/Report/CudaExperiments/KernelLevel/AchievedOccupancy.htm
+    ratio of active warps on an SM to the maximum number of active warps supported by the SM
+    Low occupancy results in poor instruction issue efficiency, because there are not enough eligible warps to hide latency between dependent instructions. 
+    When occupancy is at a sufficient level to hide latency, increasing it further may degrade performance due to the reduction in resources per thread.
+
+    Theoretical Occupancy: 大概会根据block/SM, warp/SM, reg/SM, shared/SM算出理论值
+    Achieved Occupancy: 跟实际执行时调度有关

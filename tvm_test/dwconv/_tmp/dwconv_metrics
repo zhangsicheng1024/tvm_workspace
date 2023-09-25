@@ -1,0 +1,17 @@
+==4280== NVPROF is profiling process 4280, command: python ./_tmp/dwconv_rerun.py --config1 dwconv_N128C128H28W28_energy_1000_2_json/dwconv_773.json
+==4280== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
+==4280== Profiling application: python ./_tmp/dwconv_rerun.py --config1 dwconv_N128C128H28W28_energy_1000_2_json/dwconv_773.json
+==4280== Profiling result:
+==4280== Metric result:
+Invocations                               Metric Name                                Metric Description         Min         Max         Avg
+Device "NVIDIA Tesla P100-PCIE-16GB (0)"
+    Kernel: mydwconv_kernel0
+          1                    dram_read_transactions                   Device Memory Read Transactions     1768313     1768313     1768313
+          1                   dram_write_transactions                  Device Memory Write Transactions     1609960     1609960     1609960
+          1                      l2_read_transactions                              L2 Read Transactions     4362704     4362704     4362704
+          1                     l2_write_transactions                             L2 Write Transactions     1836128     1836128     1836128
+          1                  shared_load_transactions                          Shared Load Transactions     1646592     1646592     1646592
+          1                 shared_store_transactions                         Shared Store Transactions     2383872     2383872     2383872
+          1                         flop_count_sp_fma   Floating Point Operations(Single Precision FMA)   115605504   115605504   115605504
+          1                        flop_sp_efficiency                      FLOP Efficiency(Peak Single)      10.53%      10.53%      10.53%
+          1                             sm_efficiency                           Multiprocessor Activity      97.08%      97.08%      97.08%

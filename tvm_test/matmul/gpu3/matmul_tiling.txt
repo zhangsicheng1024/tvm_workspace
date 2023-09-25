@@ -1,0 +1,49 @@
+===========compute params===========
+M=1024, N=4096, K=1024
+block_num=16, thread_num=64
+local_size=4096, data_shared_size=8192, kernel_shared_size=2048
+
+===========block===========
+for i_block in 1
+for j_block in 16
+for k_out in 128
+per block: data[1024*8] x kernel[8*256] = ret[1024*256]
+
+===========thread===========
+for i_thread in 16
+for j_thread in 4
+per thread: data[64*8] x kernel[8*64] = ret[64*64]
+
+===========local===========
+for k_local_0 in 4
+for i_local_0 in 16
+for j_local_0 in 2
+for k_local_1 in 2
+for i_local_1 in 4
+------------------------------unrolled: data[1*1] x kernel[1*32] = ret[1*32] (x1024)
+for j_local_1 in 32
+for vthread_loop in 1
+local[] = local[] + data_shared[] * kernel_shared[]
+
+==============================Memory transaction==============================
+Load (global -> shared)
+global read = shared write
+= out loop size * (block data size + block kernel size)
+= i_block * j_block * k_out * (MK/(i_block*k_out) + KN/(k_out*j_block))
+= j_block * MK + i_block * KN
+= 20971520
+
+Compute (shared -> local)
+shared read = reg write
+= not unrolled loop size * (unrolled data size + unrolled kernel size)
+= 1024 * ([1*1] + [1*32]) = 33792 / thread
+= per_thread * block_num * k_out * thread_num
+= 4429185024
+local write = MNK = 4294967296
+
+Write back (local -> global)
+local_read = global write
+= block_num * thread_num * local_size
+= MN
+= 4194304
+

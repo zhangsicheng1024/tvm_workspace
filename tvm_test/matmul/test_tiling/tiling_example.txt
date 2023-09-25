@@ -1,0 +1,29 @@
+M 512
+N 4096
+K 1024
+
+block_num = 
+thread_num = 
+
+local[]                 // [M_thread * N_thread]
+data_shared[]           // [M_block * k_in], k_in = K/k_out
+kernel_shared[]         // [k_in * N_block]
+
+---------------------------
+block
+---------------------------
+for i_block             // per block
+    for j_block         // [M_block * N_block], [M_block = M/i_block, N_block = N/j_block]
+        for k_out       // i_block * j_block = block_num
+
+---------------------------
+thread
+---------------------------
+for i_thread            // per thread
+    for j_thread        // [M_thread * N_thread], [M_thread = M_block/i_thread, N_thread = N_block/j_thread]
+                        // i_thread * j_thread = thread_num
+
+---------------------------
+local
+---------------------------
+for i_local/j_local/k_local   // i_local == M_thread, j_local == N_thread

@@ -1,0 +1,17 @@
+==881363== NVPROF is profiling process 881363, command: python ./gpu0/matmul_rerun.py --config1 matmul_M1024N4096K1024_ori_pc300+150_1000_json/matmul_999.json
+==881363== Some kernel(s) will be replayed on device 0 in order to collect all events/metrics.
+==881363== Profiling application: python ./gpu0/matmul_rerun.py --config1 matmul_M1024N4096K1024_ori_pc300+150_1000_json/matmul_999.json
+==881363== Profiling result:
+==881363== Metric result:
+Invocations                               Metric Name                                Metric Description         Min         Max         Avg
+Device "Tesla V100-DGXS-32GB (0)"
+    Kernel: mymatmul_kernel0
+          1                    dram_read_transactions                   Device Memory Read Transactions     4247935     4247935     4247935
+          1                   dram_write_transactions                  Device Memory Write Transactions      962794      962794      962794
+          1                      l2_read_transactions                              L2 Read Transactions    20676212    20676212    20676212
+          1                     l2_write_transactions                             L2 Write Transactions     2528686     2528686     2528686
+          1                  shared_load_transactions                          Shared Load Transactions    33800647    33800647    33800647
+          1                 shared_store_transactions                         Shared Store Transactions     5242880     5242880     5242880
+          1                         flop_count_sp_fma   Floating Point Operations(Single Precision FMA)  4294967296  4294967296  4294967296
+          1                        flop_sp_efficiency                      FLOP Efficiency(Peak Single)      80.07%      80.07%      80.07%
+          1                             sm_efficiency                           Multiprocessor Activity      92.66%      92.66%      92.66%
