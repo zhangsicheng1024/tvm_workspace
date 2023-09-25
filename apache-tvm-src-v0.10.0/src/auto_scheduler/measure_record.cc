@@ -316,6 +316,30 @@ RecordToFile::RecordToFile(String filename) {
   data_ = std::move(node);
 }
 
+// 
+void cccWriteMeasureRecords(std::ostream* os, const Array<MeasureInput>& inputs,
+                         const Array<MeasureResult>& results, const std::string log_version) {
+  dmlc::JSONWriter writer(os);
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    writer.BeginObject(false);
+    writer.WriteObjectKeyValue("i", *inputs[i].operator->());
+    // writer.WriteObjectKeyValue("r", *results[i].operator->());
+    // writer.WriteObjectKeyValue("v", log_version);
+    writer.EndObject();
+    *os << "\n";
+  }
+  
+  *os << "\n";
+  for(int i = 0; i < 10; i++) {
+    writer.BeginObject(false);
+    writer.WriteObjectKeyValue("i", *inputs[0].operator->());
+    // writer.WriteObjectKeyValue("r", *results[i].operator->());
+    // writer.WriteObjectKeyValue("v", log_version);
+    writer.EndObject();
+    *os << "\n";
+  }
+}
+
 void WriteMeasureRecords(std::ostream* os, const Array<MeasureInput>& inputs,
                          const Array<MeasureResult>& results, const std::string log_version) {
   dmlc::JSONWriter writer(os);

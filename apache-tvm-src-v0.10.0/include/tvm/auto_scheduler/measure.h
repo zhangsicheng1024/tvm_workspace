@@ -495,7 +495,7 @@ class ProgramMeasurerNode : public Object {
    * \return results The results of measurement.
    */
   Array<MeasureResult> Measure(const SearchTask& task, const SearchPolicy& policy,
-                               const Array<MeasureInput>& inputs, int batch_size = -1);
+                               Array<MeasureInput>& inputs, int batch_size = -1);
   /*!
    * \brief Do measurement silently.
    * This API will not print the measure results to screen.

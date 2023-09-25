@@ -187,6 +187,7 @@ class SearchPolicyNode : public Object {
   /*! \brief The array of already measured states.
    *  The good states can be used as the initial population in evolutionary search. */
   std::vector<State> measured_states_vector_;
+  std::vector<State> measured_states_vector_local_;
   /*! \brief The throughputs of already measured states */
   std::vector<float> measured_states_throughputs_;
 };

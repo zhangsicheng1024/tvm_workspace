@@ -22,7 +22,12 @@
  * \brief Distributed measurement infrastructure to measure the runtime costs of tensor programs.
  */
 
+#include <fstream>
+#include <iostream>
+#include <unistd.h>
+
 #include <tvm/auto_scheduler/measure.h>
+#include <tvm/auto_scheduler/measure_record.h>
 #include <tvm/runtime/registry.h>
 
 #include <algorithm>
@@ -232,17 +237,21 @@ void ProgramMeasurerNode::Reset() {
 
 Array<MeasureResult> ProgramMeasurerNode::Measure(const SearchTask& task,
                                                   const SearchPolicy& policy,
-                                                  const Array<MeasureInput>& inputs,
+                                                  Array<MeasureInput>& inputs,
                                                   int batch_size) {
   auto t_begin = std::chrono::high_resolution_clock::now();
 
   Array<MeasureResult> results;
+  Array<MeasureInput> inputs_tmp;
   results.reserve(inputs.size());
+  inputs_tmp.reserve(inputs.size());
 
   if (batch_size == -1) {
     // set default batch size
     batch_size = builder->n_parallel * 2;
   }
+
+  std::cout<<"batch_size: "<<batch_size<<std::endl;
 
   int old_verbosity = verbose;
 
@@ -253,12 +262,73 @@ Array<MeasureResult> ProgramMeasurerNode::Measure(const SearchTask& task,
                                     inputs.begin() + std::min(i + batch_size, inputs.size()));
     Array<MeasureResult> result_batch;
 
+    // ccc
+    char* gpu_id = std::getenv("CUDA_VISIBLE_DEVICES");
+    std::string work_dir = "/workspace/tvm_test/tmp_buildtar/gpu";
+    work_dir = work_dir + gpu_id + "/";
+    std::string json_path = work_dir + "temp.json";
+    std::string index_path = work_dir + "index.txt";
+    std::string energy_dict_path = work_dir + "energy_dict.txt";
+    std::string energy_record_path = "energy_record";
+    energy_record_path = energy_record_path + gpu_id + ".txt";
+    std::cout << "json_path: " << json_path << std::endl;
+    std::cout << "energy_record_path: " << energy_record_path << std::endl;
+
+    // generate json start
+    std::cout << "************generate json start" << std::endl;
+    std::ofstream ofs(json_path);
+    cccWriteMeasureRecords(&ofs, input_batch, result_batch);
+    std::cout << "************generate json end" << std::endl;
+    // generate json end
+
+
     // build and run
     SilentMeasure(task, input_batch, &result_batch);
+    std::cout << "input batch size " << input_batch.size() << std::endl;
+    std::cout << "result batch size " << result_batch.size() << std::endl;
+
+    std::cout<< "3333333333333" <<std::endl;
+
+    
+
+    Array<MeasureInput> input_batch_top;
+    input_batch_top.reserve(input_batch.size());
+
+    std::fstream f;
+    
+    f.open(index_path, std::ios::in);
+    int s;
+    int *index_list = new int[64];
+    int flag=0;
+    while (f>>s)
+    {
+        *(index_list + flag) = s;
+        flag++;
+    }
+    f.close();
+    int index;
+    for (int j = 0; j < flag; ++j) {
+      index = index_list[j];
+      input_batch_top.push_back(input_batch[index]);
+    }
+
+    f.open(energy_dict_path, std::ios::in);
+    std::string str_in;
+    std::map<int, float> dict;
+    while (f>>str_in)
+    {
+        int index = atoi(str_in.c_str());
+        f>>str_in;
+        float energy = atof(str_in.c_str());
+        dict[index] = energy;
+    }
+    f.close();
+
+    std::cout<<"input_batch_top size: "<<input_batch_top.size()<<std::endl;
 
     // update current best state according to the new measure result
-    for (size_t j = 0; j < input_batch.size(); ++j) {
-      const String& workload_key = input_batch[j]->task->workload_key;
+    for (size_t j = 0; j < input_batch_top.size(); ++j) {
+      const String& workload_key = input_batch_top[j]->task->workload_key;
       double flops;
 
       if (result_batch[j]->error_no == 0) {
@@ -272,29 +342,43 @@ Array<MeasureResult> ProgramMeasurerNode::Measure(const SearchTask& task,
 
       if (flops > best_flops[workload_key]) {
         best_flops[workload_key] = flops;
-        best_state[workload_key] = input_batch[j]->state;
+        best_state[workload_key] = input_batch_top[j]->state;
         best_ct[workload_key] = ct;
       }
 
       ct++;
-      StdCout(verbose, 2) << std::fixed << std::setprecision(2) << Chars('=', 50) << "\n"
-                          << "No: " << ct << "\tGFLOPS: " << flops / 1e9 << " / "
-                          << best_flops[workload_key] / 1e9 << "\tresults: " << result_batch[j]
-                          << "\n"
-                          << Chars('=', 50) << "\n"
-                          << input_batch[j]->state << "\n";
+      // StdCout(verbose, 2) << std::fixed << std::setprecision(2) << Chars('=', 50) << "\n"
+      //                     << "No: " << ct << "\tGFLOPS: " << flops / 1e9 << " / "
+      //                     << best_flops[workload_key] / 1e9 << "\tresults: " << result_batch[j]
+      //                     << "\n"
+      //                     << Chars('=', 50) << "\n"
+      //                     << input_batch_top[j]->state << "\n";
     }
+
+    std::cout<< "4444444444444444444444444" <<std::endl;
 
     // Call callback functions
     if (callbacks) {
       for (const auto& callback : callbacks.value()) {
-        callback->Callback(policy, input_batch, result_batch);
+        callback->Callback(policy, input_batch_top, result_batch);
       }
     }
+
+    f.open(energy_record_path, std::ios::app);
+    for (int j = 0; j < flag; ++j) {
+      index = index_list[j];
+      f << dict[index] << std::endl;
+    }
+    f.close();
+    dict.clear();
 
     // Store result batch
     for (auto& res : result_batch) {
       results.push_back(res);
+    }
+
+    for (auto& input_item : input_batch_top) {
+        inputs_tmp.push_back(input_item);
     }
 
     if (error_ct > max_continuous_error) {
@@ -306,7 +390,15 @@ Array<MeasureResult> ProgramMeasurerNode::Measure(const SearchTask& task,
     }
   }
 
+  inputs.clear();
+  for (auto& input_item : inputs_tmp) {
+        inputs.push_back(input_item);
+  }
+
   PrintTimeElapsed(t_begin, "measurement", verbose);
+
+  std::cout<<"inputs size: "<<inputs.size()<<std::endl;
+  std::cout<<"results size: "<<results.size()<<std::endl;
 
   return results;
 }
@@ -314,11 +406,13 @@ Array<MeasureResult> ProgramMeasurerNode::Measure(const SearchTask& task,
 void ProgramMeasurerNode::SilentMeasure(const SearchTask& task, const Array<MeasureInput>& inputs,
                                         Array<MeasureResult>* results) {
   results->clear();
-  results->reserve(inputs.size());
+  // results->reserve(inputs.size());
 
   // Call builder and runner
   Array<BuildResult> build_res_batch = builder->Build(inputs, verbose);
   Array<MeasureResult> result_batch = runner->Run(inputs, build_res_batch, verbose);
+
+  results->reserve(result_batch.size());
 
   // Store result batch
   for (auto& res : result_batch) {

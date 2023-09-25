@@ -190,14 +190,25 @@ State SketchPolicyNode::Search(int n_trials, int early_stopping, int num_measure
       // Search one round to get promising states
       PrintTitle("Search", verbose);
       best_states = SearchOneRound(num_random * 3, &random_states);
+      printf("best_states size=%d\n", best_states.size());
+      // best_state.size = 128
+
+      std::cout<<"checkpoint1111111111"<<std::endl;
 
       // Infer bound. This is necessary for computing the correct ToStr() for redundancy check
       best_states = search_task->compute_dag.InferBound(best_states);
       random_states = search_task->compute_dag.InferBound(random_states);
 
+      std::cout<<"checkpoint2222222222"<<std::endl;
+
       // Pick `num_measure_per_iter` states to measure, check hash to remove already measured state
       // Also pick some random states to do eps-greedy
       inputs = PickStatesWithEpsGreedy(best_states, random_states, n_trials - ct);
+      printf("inputs size=%d\n", inputs.size());
+      printf("measured_states_vector_local_ size=%d\n", measured_states_vector_local_.size());
+      //input之前是64个，现在是2倍->128个
+
+      std::cout<<"checkpoint3333333333"<<std::endl;
 
       // Currently it's hard to detect if all of the search space has been traversed
       // Stop if no extra valid states found in several retries
@@ -216,7 +227,8 @@ State SketchPolicyNode::Search(int n_trials, int early_stopping, int num_measure
 
       // Measure candidate states
       PrintTitle("Measure", verbose);
-      results = measurer->Measure(search_task, GetRef<SearchPolicy>(this), inputs);
+      results = measurer->Measure(search_task, GetRef<SearchPolicy>(this), inputs, 128);
+      printf("results size=%d\n", results.size());
       ct += inputs.size();
 
       // Check if reach the early stopping condition
@@ -226,6 +238,49 @@ State SketchPolicyNode::Search(int n_trials, int early_stopping, int num_measure
                          << early_stopping << " measurements trials.\n";
         break;
       }
+
+      // ==================zyj=======================
+      std::fstream f;
+    
+      char* gpu_id = std::getenv("CUDA_VISIBLE_DEVICES");
+      std::string work_dir = "/workspace/tvm_test/tmp_buildtar/gpu";
+      work_dir = work_dir + gpu_id + "/";
+      std::string index_path = work_dir + "index.txt";
+      std::string energy_dict_path = work_dir + "energy_dict.txt";
+
+      f.open(index_path, std::ios::in);
+      int s;
+      int *index_list = new int[64];
+      int flag=0;
+      while (f>>s)
+      {
+          *(index_list + flag) = s;
+          flag++;
+      }
+      f.close();
+
+      f.open(energy_dict_path, std::ios::in);
+      std::string str_in;
+      std::map<int, float> energy_dict;
+      while (f>>str_in)
+      {
+          int index = atoi(str_in.c_str());
+          f>>str_in;
+          float energy = atof(str_in.c_str());
+          energy_dict[index] = energy;
+      }
+      f.close();
+
+      for (int j = 0; j < flag; ++j) {
+        int index = index_list[j];
+        measured_states_vector_.push_back(measured_states_vector_local_[index]);
+        // measured_states_throughputs_.push_back(1.0 / energy_dict[index]);
+      }
+
+      measured_states_vector_local_.clear();
+
+      printf("flag=%d\n", flag);
+      // ==================zyj=======================
 
       // Update measured states throughputs. These states will join the EvolutionarySearch in later
       // search rounds.
@@ -262,7 +317,7 @@ std::pair<Array<MeasureInput>, Array<MeasureResult>> SketchPolicyNode::ContinueS
 
   // Measure candidate states
   PrintTitle("Measure", verbose);
-  results = measurer->Measure(search_task, GetRef<SearchPolicy>(this), inputs);
+  results = measurer->Measure(search_task, GetRef<SearchPolicy>(this), inputs, 128);
 
   // Update measured states throughputs. These states will join the EvolutionarySearch in later
   // search rounds.
@@ -294,20 +349,29 @@ Array<State> SketchPolicyNode::SearchOneRound(int num_random_states, Array<State
   if (sketch_cache_.empty()) {
     sketch_cache_ = GenerateSketches();
   }
+  printf("num_use_measured=%d\n", num_use_measured);
 
   // 2. Sample the init population
   Array<State> init_population = SampleInitPopulation(sketch_cache_);
 
+  std::cout<<"checkpoint44444444444444"<<std::endl;
+
   // 3. Perform evolutionary search.
   // Also insert already measured good states to the initial population
+  // indices: throughput high->low(latency low->high)
   std::vector<int> indices = Argsort(measured_states_throughputs_);
+  printf("measured_states_throughputs_ size=%d\n", measured_states_throughputs_.size());
+  printf("measured_states_vector_ size=%d\n", measured_states_vector_.size());
+  std::cout<<"checkpoint777777777777777777777777"<<std::endl;
   for (int i = 0; i < num_use_measured; i++) {
     init_population.push_back(measured_states_vector_[indices[i]]);
   }
+  std::cout<<"checkpoint5555555555555555"<<std::endl;
   // Sample some random states for eps-greedy
   if (num_random_states > 0 && random_states != nullptr) {
     *random_states = RandomSampleStates(init_population, &rand_gen, num_random_states);
   }
+  std::cout<<"checkpoint6666666666666666666"<<std::endl;
   return EvolutionarySearch(init_population, num_measure_per_iter_ * 2);
 }
 
@@ -623,17 +687,20 @@ Array<State> SketchPolicyNode::EvolutionarySearch(const Array<State>& init_popul
   return best_states;
 }
 
+// ===================zyj================================
+// 之前是从128个best+N个random挑出64个，现在是从128个best+N个random挑出128个，进入measure部分再根据nvprof得到的数据保留64个
 Array<MeasureInput> SketchPolicyNode::PickStatesWithEpsGreedy(const Array<State>& best_states,
                                                               const Array<State>& random_states,
                                                               int remaining_n_trials) {
+  int num_measure_per_iter_here = num_measure_per_iter_ * 2;
   int num_random =
-      static_cast<int>(GetDoubleParam(params, SketchParamKey::eps_greedy) * num_measure_per_iter_);
-  int num_good = num_measure_per_iter_ - num_random;
+      static_cast<int>(GetDoubleParam(params, SketchParamKey::eps_greedy) * num_measure_per_iter_here );
+  int num_good = num_measure_per_iter_here - num_random;
 
   Array<MeasureInput> inputs;
   size_t offset_best = 0, offset_random = 0;
 
-  while (static_cast<int>(inputs.size()) < std::min(num_measure_per_iter_, remaining_n_trials)) {
+  while (static_cast<int>(inputs.size()) < std::min(num_measure_per_iter_here, remaining_n_trials)) {
     State state;
 
     bool has_best = offset_best < best_states.size();
@@ -663,7 +730,7 @@ Array<MeasureInput> SketchPolicyNode::PickStatesWithEpsGreedy(const Array<State>
     std::string state_str = state.ToStr();
     if (!measured_states_set_.count(state_str)) {
       measured_states_set_.insert(std::move(state_str));
-      measured_states_vector_.push_back(state);
+      measured_states_vector_local_.push_back(state);
       inputs.push_back(MeasureInput(search_task, state));
     }
   }

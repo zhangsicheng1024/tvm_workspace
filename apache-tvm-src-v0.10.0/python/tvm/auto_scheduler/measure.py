@@ -46,6 +46,11 @@ from tvm.driver import build_module
 from tvm.ir import transform
 from tvm.runtime import Object, module, ndarray
 from tvm.target import Target
+import random
+import time
+import json
+import subprocess
+import psutil
 
 from . import _ffi_api
 from .loop_state import StateObject
@@ -69,6 +74,7 @@ logger = logging.getLogger("auto_scheduler")
 # We use 1e10 instead of sys.float_info.max for better readability in log
 MAX_FLOAT = 1e10
 
+index_top = []
 
 class BuildFunc:
     """store build_func name and callable to class variable.
@@ -710,9 +716,240 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
     )
 
     results = []
+
+    print("*************************measure.py build")
+    gpu_id = os.environ['CUDA_VISIBLE_DEVICES']
+    assert gpu_id != ""
+    workdir = '/workspace/tvm_test/tmp_buildtar/gpu' + gpu_id
+    op = 'matmul'
+    file_energy_dict = open(os.path.join(workdir, 'energy_dict.txt'), 'w')
+    
+
+    # json preprocess
+    count = 0
+    json_in = open(os.path.join(workdir, 'temp.json'), 'r')
+    while True:
+        line = json_in.readline()
+        if line == "\n": break
+        json_out = open(os.path.join(workdir, 'json', 'temp_' + str(count) + '.json'), 'w')
+        injson = json.loads(line)
+        injson['r'] = [[0.0007], 0, 3.0, 1000000000]
+        injson['v'] = "v0.6"
+        line = json.dumps(injson) + '\n'
+        json_out.write(line)
+        json_out.close()
+        count += 1
+    json_in.close()
+
+    dict_sm = {}
+    index = 0
     for res in tuple_res:
         if res.status == StatusKind.COMPLETE:
             results.append(BuildResult(*res.value))
+            # print('----------type0', type(res)) # <class 'tvm.contrib.popen_pool.MapResult'>
+            # print("----------type1", type(BuildResult(*res.value))) # <class 'tvm.auto_scheduler.measure.BuildResult'>
+
+            # ==========zyj start============================================
+            # sm efficiency
+            '''
+            command_cp = 'cp ' +  res.value[0] + ' /data/tvm_test/tmp_buildtar/'
+            # command_nvprof = 'ncu --metrics smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_peak_sustained_elapsed,smsp__cycles_active.avg.pct_of_peak_sustained_elapsed --log-file /data/tvm_test/tmp_buildtar/log python /data/tvm_test/tmp_buildtar/dwconv_load_run.py'
+            command_nvprof = 'nvprof --metrics sm_efficiency,flop_sp_efficiency --log-file /data/tvm_test/tmp_buildtar/log python /data/tvm_test/tmp_buildtar/dwconv_load_run.py'
+            
+            # os.system(command_cp)
+            # os.system(command_nvprof)
+            # # =====get SM efficienency from collection====
+            # f_sm = open("/data/tvm_test/tmp_buildtar/log",'r')
+            # while True:
+            #     line = f_sm.readline()
+            #     if not line: break
+            #     text_sm = line.split()
+            #     if len(text_sm) == 0: continue
+            #     # print('text_sm', text_sm)
+            #     if text_sm[1] == "sm_efficiency": # sm_efficiency
+            #         sm_efficiency = float(text_sm[-1][:-1])
+            #     if text_sm[1] == "flop_sp_efficiency": # sm_efficiency
+            #         flop_efficiency = float(text_sm[-1][:-1])
+            # f_sm.close()
+
+            flop_efficiency = random.random()
+            sm_efficiency = random.random()
+
+            # =====store SM efficiency to a dict==========
+            fds = flop_efficiency / sm_efficiency
+            fms = flop_efficiency * sm_efficiency
+            # TODO
+            dict_sm[sm_efficiency] = index
+            # dict_sm[fds] = index
+            '''
+
+            # '''
+            # energy
+            # try:
+            path_json = os.path.join(workdir, 'json', 'temp_' + str(index) + '.json')
+            path_rerun = os.path.join(workdir, op + '_rerun.py')
+            path_cu = os.path.join(workdir, op + '.cu')
+            path_gridblk = os.path.join(workdir, op + '_gridblk.txt')
+            path_latency = os.path.join(workdir, op + '_latency.txt')
+            path_kernel_cu_lat_template = os.path.join(workdir, op + '_kernel_lat_template.cu')
+            path_kernel_cu_lat = os.path.join(workdir, op + '_kernel_lat.cu')
+            path_kernel_cu_ene_template = os.path.join(workdir, op + '_kernel_ene_template.cu')
+            path_kernel_cu_ene = os.path.join(workdir, op + '_kernel_ene.cu')
+            path_kernel_o = os.path.join(workdir, op + '_o')
+
+            HEADERNVMLAPI = '-lnvidia-ml -L/usr/local/cuda-11.0/lib64 -lcuda -I/usr/local/cuda-11.0/include -lpthread -I/workspace/tvm_test/nvml-power'
+            INCLUDEPROG = '/workspace/tvm_test/nvml-power/nvmlPower' + gpu_id + '.cpp'
+
+            def get_latency(repeat_warmpup, repeat_run):
+                # get gridblk and declaration
+                file_gridblk = open(path_gridblk, 'r')
+                grid = file_gridblk.readline().split()
+                blk = file_gridblk.readline().split()
+                file_gridblk.close()
+
+                file_cu = open(path_cu, 'r')
+                while True:
+                    line = file_cu.readline()
+                    if not line: break
+                    line = line.split()
+                    if len(line) == 0: continue
+                    if(line[0] == 'extern'):
+                        declare = ' '.join(line[:-1]) + ';\n'
+                        break
+                file_cu.close()
+                
+                # generate kernel cuda for latency
+                command_copy_kernel = 'cp ' + path_kernel_cu_lat_template + ' ' + path_kernel_cu_lat
+                print(command_copy_kernel)
+                os.system(command_copy_kernel)
+
+                file_kernel_cu_lat_template = open(path_kernel_cu_lat_template, 'r')
+                content = file_kernel_cu_lat_template.read()
+                file_kernel_cu_lat_template.close()
+
+                file_kernel_cu_lat = open(path_kernel_cu_lat, 'w')
+                file_kernel_cu_lat.write('#define REPEAT_WARMUP ' + str(repeat_warmpup) + '\n')
+                file_kernel_cu_lat.write('#define REPEAT_RUN ' + str(repeat_run) + '\n')
+                file_kernel_cu_lat.write('dim3 dimGrid(' + grid[0] + ', ' + grid[1] + ', ' + grid[2] + ');\n')
+                file_kernel_cu_lat.write('dim3 dimBlock(' + blk[0] + ', ' + blk[1] + ', ' + blk[2] + ');\n')
+                file_kernel_cu_lat.write(declare + '\n')
+                file_kernel_cu_lat.write(content)
+                file_kernel_cu_lat.close()
+
+                # generate latency, warmup + latency(run)
+                command_make = 'nvcc -o ' + path_kernel_o + ' ' + path_cu + ' ' +  path_kernel_cu_lat + ' ' + HEADERNVMLAPI + ' ' + INCLUDEPROG
+                print(command_make)
+                os.system(command_make)
+
+                command_run = path_kernel_o + ' > ' + path_latency
+                print(command_run)
+                os.system(command_run)
+                file_latency = open(path_latency, 'r')
+                latency = float(file_latency.readline().strip()) / 1000.0 # s
+                file_latency.close()
+                return latency
+
+            # generate gridblk and cuda src
+            command_gridblk_cu = 'python ' + path_rerun + ' --config1 ' + path_json + ' --config2 ' + path_cu + ' > ' + path_gridblk
+            print(command_gridblk_cu)
+            os.system(command_gridblk_cu)
+
+            # generate latency
+            latency_rough = get_latency(0, 1)       # warmup=0, run=1
+            print('latency_rough =', latency_rough)
+            warmup_time = 2 # s
+            warmup_repeat = int(warmup_time / latency_rough)
+            latency = get_latency(warmup_repeat, 1) # warmup=2s, run=1
+            print('latency =', latency)
+
+            # get gridblk and declaration
+            file_gridblk = open(path_gridblk, 'r')
+            grid = file_gridblk.readline().split()
+            blk = file_gridblk.readline().split()
+            file_gridblk.close()
+
+            file_cu = open(path_cu, 'r')
+            while True:
+                line = file_cu.readline()
+                if not line: break
+                line = line.split()
+                if len(line) == 0: continue
+                if(line[0] == 'extern'):
+                    declare = ' '.join(line[:-1]) + ';\n'
+                    break
+            file_cu.close()
+
+            # generate kernel cuda for energy
+            command_copy_kernel = 'cp ' + path_kernel_cu_ene_template + ' ' + path_kernel_cu_ene
+            print(command_copy_kernel)
+            os.system(command_copy_kernel)
+
+            RUNTIME = 20 # s
+            repeat_times = int(RUNTIME / latency)
+            print('add gridblk & repeat, repeat = ', repeat_times)
+
+            file_kernel_cu_ene_template = open(path_kernel_cu_ene_template, 'r')
+            content = file_kernel_cu_ene_template.read()
+            file_kernel_cu_ene_template.close()
+
+            file_kernel_cu_ene = open(path_kernel_cu_ene, 'w')
+            file_kernel_cu_ene.write('#define REPEAT ' + str(repeat_times) + '\n')
+            file_kernel_cu_ene.write('dim3 dimGrid(' + grid[0] + ', ' + grid[1] + ', ' + grid[2] + ');\n')
+            file_kernel_cu_ene.write('dim3 dimBlock(' + blk[0] + ', ' + blk[1] + ', ' + blk[2] + ');\n')
+            file_kernel_cu_ene.write(declare + '\n')
+            file_kernel_cu_ene.write(content)
+            file_kernel_cu_ene.close()
+
+            # build
+            command_make = 'nvcc -o ' + path_kernel_o + ' ' + path_cu + ' ' +  path_kernel_cu_ene + ' ' + HEADERNVMLAPI + ' ' + INCLUDEPROG
+            print(command_make)
+            os.system(command_make)
+
+            # run
+            print(path_kernel_o)
+            TIMEOUT = RUNTIME * 2 # s
+            subp = subprocess.Popen([path_kernel_o])
+            p = psutil.Process(subp.pid)
+            try:
+                p.wait(timeout=TIMEOUT)
+                print('run finish')
+            except psutil.TimeoutExpired:
+                p.kill()
+                print('run timeout(' + str(TIMEOUT) + 's), kill')
+
+            # collect power result & energy
+            file_power=open('Power_data' + gpu_id + '.txt')
+            lines = file_power.read()
+            if len(lines) == 0: # warmup timeout(very slow kernel), use power=400W as error
+                energy = 400 * latency * 1000
+                power_peak = 0
+                power_avg = 0
+            else:
+                lines = lines.split()
+                sum = 0.0
+                power_peak = 0
+                for i in lines:
+                    power = float(i)
+                    sum += power
+                    if power > power_peak: power_peak = power
+                power_avg = sum / len(lines) # w
+                energy = power_avg * latency * 1000 # mJ
+            file_power.close()
+            # '''
+            # energy = index
+
+            # except Exception:
+            #     print('can not get energy, use default 10000')
+            #     energy = 10000 + index * 0.1
+
+            dict_sm[energy] = index
+            file_energy_dict.write(str(index) + ' ' + str(energy) + '\n')
+
+            print('******************kernel %d, latency = %f, energy = %f, power_peak = %f, power_avg = %f******************' % (index, latency, energy, power_peak, power_avg))
+            print()
+
+            # ==========zyj end===============================================
+
         elif res.status == StatusKind.TIMEOUT:
             if verbose >= 1:
                 print(".T", end="", flush=True)  # Build timeout
@@ -725,7 +962,27 @@ def local_builder_build(inputs, timeout, n_parallel, build_func="default", verbo
             )
         else:
             raise ValueError("Result status is not expected. Unreachable branch")
+        index += 1
+    file_energy_dict.close()
 
+    # ==========sort the SM efficiency & select top 64 inputs to results list
+    print('dict_sm', dict_sm)
+
+    # TODO
+    sorted_sm = sorted(dict_sm)
+    # sorted_sm = sorted(dict_sm, reverse=True)
+    print('sorted_sm', sorted_sm)
+
+    if(len(sorted_sm)>64):
+        for index in range(int(len(sorted_sm)/2)):
+            index_top.append(dict_sm[sorted_sm[index]])
+    else:
+        for index in range(len(sorted_sm)):
+            index_top.append(dict_sm[sorted_sm[index]])
+
+
+    print('index_top', index_top)
+    print("2222222222222222222222")
     return results
 
 
@@ -1290,7 +1547,19 @@ def rpc_runner_run(
     res : List[MeasureResult]
         The measure results of these MeasureInputs.
     """
+    # print(len(inputs))
+    # print(len(build_results))
+    print("*************************measure.py run")
     assert len(inputs) == len(build_results), "Measure input size should be equal to build results"
+    # ==========================zyj=========================
+    print('index_top', index_top)
+    inputs_used = [inputs[i] for i in index_top]
+    build_results_used = [build_results[i] for i in index_top]
+
+    # index_top = []
+
+
+    # ======================================================
     # This pool is not doing computationally intensive work, so we can use threads
     executor = PopenPoolExecutor(n_parallel)
     tuple_res = executor.map_with_error_catching(
@@ -1313,7 +1582,7 @@ def rpc_runner_run(
                 verbose,
                 device,
             )
-            for inp, build_res in zip(inputs, build_results)
+            for inp, build_res in zip(inputs_used, build_results_used)
         ],
     )
 
@@ -1325,7 +1594,7 @@ def rpc_runner_run(
             assert res.status == StatusKind.TIMEOUT
             if verbose >= 1:
                 print("*T", end="")  # Run timeout
-            build_res = build_results[i]
+            build_res = build_results_used[i]
             results.append(
                 MeasureResult(
                     (MAX_FLOAT,),
@@ -1338,5 +1607,20 @@ def rpc_runner_run(
 
     if verbose >= 1:
         print("")
+
+    print("111111111111111111111111111111111")
+    print('len(results)', len(results))
+
+    gpu_id = os.environ['CUDA_VISIBLE_DEVICES']
+    assert gpu_id != ""
+    workdir = '/workspace/tvm_test/tmp_buildtar/gpu' + gpu_id
+    f_index = open(os.path.join(workdir, 'index.txt'), "w")
+    for i in index_top:
+        f_index.write(str(i)+'\n')
+    f_index.close()
+
+    for i in range(len(index_top)):
+        index_top.pop()
+    
 
     return results

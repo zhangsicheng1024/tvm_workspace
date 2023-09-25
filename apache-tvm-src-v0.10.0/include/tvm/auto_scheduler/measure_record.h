@@ -113,6 +113,10 @@ class RecordReader : public ObjectRef {
   TVM_DEFINE_MUTABLE_OBJECT_REF_METHODS(RecordReader, ObjectRef, RecordReaderNode);
 };
 
+void cccWriteMeasureRecords(std::ostream* os, const Array<MeasureInput>& inputs,
+                         const Array<MeasureResult>& results,
+                         const std::string log_version = AUTO_SCHEDULER_LOG_VERSION);
+
 /*!
  * \brief Append measure records to an output stream.
  * \param os A pointer to a output stream.
